@@ -1,13 +1,295 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Poster Outreach Assistant</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Poster Outreach Assistant</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;background:#f3f5f9;color:#202b3c;margin:0;padding:18px}
+main{max-width:760px;margin:auto}
+header,.panel{background:white;padding:20px;border-radius:14px;margin-bottom:16px;box-shadow:0 2px 9px #0000000b}
+h1{font-size:25px;margin:0 0 8px}
+h2{font-size:19px;margin-top:0}
+p{line-height:1.5}
+label{display:block;font-weight:bold;margin:14px 0 6px}
+input,textarea,select{width:100%;padding:12px;border:1px solid #cbd2df;border-radius:8px;font:inherit}
+textarea{min-height:100px;resize:vertical}
+button,.wa{display:inline-block;border:0;border-radius:8px;padding:11px 14px;background:#2457d6;color:white;font-weight:bold;cursor:pointer;text-decoration:none;font-size:14px;margin:5px 4px 5px 0}
+.secondary{background:#e8edf7;color:#20304b}
+.danger{background:#a72e36}
+.small{font-size:13px;color:#586579}
+.notice{background:#fff5d9;padding:12px;border-radius:8px;font-size:14px;line-height:1.5}
+.task{border:1px solid #dce1ea;padding:14px;border-radius:10px;margin:12px 0;overflow-wrap:anywhere}
+.task h3{margin:0 0 8px}
+.status{font-size:13px;font-weight:bold;color:#2457d6}
+.check{display:flex;align-items:flex-start;gap:9px;font-weight:normal;line-height:1.5}
+.check input{width:auto;margin-top:5px}
+#message{background:#f7f9fc}
+</style>
 </head>
 <body>
-  <h1>Poster Outreach Assistant</h1>
-  <p>Track your poster-design customer outreach.</p>
-  <p>Daily task limit: 10</p>
+<main>
+<header>
+<h1>Poster Outreach Assistant</h1>
+<p>Manage poster-design leads and prepare personalized WhatsApp messages.</p>
+<p><strong>Today's task limit: 10</strong></p>
+<p id="stats">Loading tasks...</p>
+</header>
+
+<section class="panel">
+<h2>Add a business</h2>
+<form id="leadForm">
+<label for="business">Business name</label>
+<input id="business" required maxlength="100" placeholder="e.g. Sharma Bakery">
+
+<label for="phone">WhatsApp number</label>
+<input id="phone" required inputmode="tel" placeholder="Country code + number, e.g. 919876543210">
+
+<label for="service">Poster service</label>
+<select id="service">
+<option>Promotional posters</option>
+<option>Festival posters</option>
+<option>Social media posters</option>
+<option>Menu and offer posters</option>
+<option>Custom poster design</option>
+</select>
+
+<label for="detail">Personal detail (optional)</label>
+<input id="detail" maxlength="150" placeholder="e.g. your bakery's weekend offers">
+
+<label for="custom">Your name or design brand</label>
+<input id="custom" maxlength="100" placeholder="e.g. Creative Posters" required>
+
+<label class="check">
+<input type="checkbox" id="consent" required>
+<span>I have permission to contact this business on WhatsApp, or it has explicitly agreed to receive these messages.</span>
+</label>
+
+<p class="small">Only add contacts who have agreed to be contacted. Do not use this tool to send unsolicited bulk messages.</p>
+<button type="submit">Add outreach task</button>
+</form>
+<p id="feedback" role="status"></p>
+</section>
+
+<section class="panel">
+<h2>Today's progress</h2>
+<div class="notice">The app saves tasks in this browser. It does not send messages automatically. Review each message and send it yourself in WhatsApp.</div>
+<p id="progress"></p>
+</section>
+
+<section class="panel">
+<h2>Your outreach tasks</h2>
+<div id="tasks"></div>
+<button class="secondary" id="export">Export backup (CSV)</button>
+<button class="danger" id="clear">Delete all tasks</button>
+<p class="small">Export a backup before clearing data. Clearing cannot be undone.</p>
+</section>
+</main>
+
+<script>
+const KEY = "posterOutreachAssistantV1";
+const $ = id => document.getElementById(id);
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY) || "[]"); }
+  catch { return []; }
+}
+let leads = load();
+
+function save() {
+  localStorage.setItem(KEY, JSON.stringify(leads));
+}
+
+function today() {
+  const d = new Date();
+  return d.getFullYear() + "-" +
+    String(d.getMonth()+1).padStart(2,"0") + "-" +
+    String(d.getDate()).padStart(2,"0");
+}
+
+function digits(value) {
+  return value.replace(/\D/g,"");
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;",
+    '"':"&quot;", "'":"&#39;"
+  })[c]);
+}
+
+function messageFor(lead) {
+  return `Hello ${lead.business}! I’m reaching out from ${lead.brand}. ` +
+    `I offer ${lead.service.toLowerCase()} for businesses.` +
+    (lead.detail ? ` I noticed: ${lead.detail}.` : "") +
+    ` If you are interested, I’d be happy to share my design samples and prices. ` +
+    `No worries if this isn't relevant. Thank you!`;
+}
+
+function render() {
+  const day = today();
+  const todayTasks = leads.filter(x => x.created === day);
+  const sentToday = leads.filter(x => x.sentDate === day);
+  $("stats").textContent =
+    `${todayTasks.length}/10 tasks created today · ${sentToday.length}/10 messages marked sent today`;
+  $("progress").textContent =
+    `Created today: ${todayTasks.length} · Marked sent today: ${sentToday.length} · Total saved: ${leads.length}`;
+
+  $("tasks").innerHTML = "";
+
+  if (!leads.length) {
+    $("tasks").textContent = "No tasks yet. Add your first permitted contact above.";
+    return;
+  }
+
+  [...leads].reverse().forEach(lead => {
+    const div = document.createElement("article");
+    div.className = "task";
+    const status = lead.sentDate ? `Marked sent on ${lead.sentDate}` : "Not marked sent";
+    div.innerHTML = `
+      <h3>${escapeHTML(lead.business)}</h3>
+      <p>${escapeHTML(lead.phone)}</p>
+      <p>${escapeHTML(lead.service)}</p>
+      <p class="status">${status}</p>
+      <label>Personalized message</label>
+      <textarea readonly id="msg-${lead.id}">${messageFor(lead)}</textarea>
+      <button data-action="copy" data-id="${lead.id}" class="secondary">Copy message</button>
+      <button data-action="open" data-id="${lead.id}">Review in WhatsApp</button>
+      <button data-action="sent" data-id="${lead.id}" class="secondary">Mark sent</button>
+      <button data-action="delete" data-id="${lead.id}" class="danger">Delete task</button>
+    `;
+    $("tasks").appendChild(div);
+  });
+}
+
+$("leadForm").addEventListener("submit", event => {
+  event.preventDefault();
+
+  const day = today();
+  const phone = digits($("phone").value);
+  const business = $("business").value.trim();
+  const brand = $("custom").value.trim();
+
+  if (phone.length < 8 || phone.length > 15) {
+    $("feedback").textContent =
+      "Enter a valid WhatsApp number with its country code.";
+    return;
+  }
+
+  if (leads.some(x => digits(x.phone) === phone)) {
+    $("feedback").textContent =
+      "This number is already saved. Duplicate contact blocked.";
+    return;
+  }
+
+  if (leads.filter(x => x.created === day).length >= 10) {
+    $("feedback").textContent =
+      "Daily limit reached. You can add more tasks tomorrow.";
+    return;
+  }
+
+  if (leads.filter(x => x.sentDate === day).length >= 10) {
+    $("feedback").textContent =
+      "Today's sending limit is reached. Try again tomorrow.";
+    return;
+  }
+
+  leads.push({
+    id: String(Date.now()) + Math.random().toString(36).slice(2,7),
+    business,
+    phone,
+    service: $("service").value,
+    detail: $("detail").value.trim(),
+    brand,
+    created: day,
+    sentDate: null
+  });
+
+  save();
+  $("leadForm").reset();
+  $("feedback").textContent = "Task added successfully.";
+  render();
+});
+
+$("tasks").addEventListener("click", async event => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+
+  const lead = leads.find(x => x.id === button.dataset.id);
+  if (!lead) return;
+
+  if (button.dataset.action === "copy") {
+    try {
+      await navigator.clipboard.writeText(messageFor(lead));
+      $("feedback").textContent = "Message copied.";
+    } catch {
+      const area = $("msg-" + lead.id);
+      area.focus();
+      area.select();
+      $("feedback").textContent = "Select and copy the message.";
+    }
+  }
+
+  if (button.dataset.action === "open") {
+    const url = "https://wa.me/" + digits(lead.phone) +
+      "?text=" + encodeURIComponent(messageFor(lead));
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  if (button.dataset.action === "sent") {
+    if (lead.sentDate) {
+      $("feedback").textContent = "This task is already marked sent.";
+      return;
+    }
+    if (leads.filter(x => x.sentDate === today()).length >= 10) {
+      $("feedback").textContent = "Daily sent limit reached.";
+      return;
+    }
+    if (confirm("Did you actually send this message in WhatsApp?")) {
+      lead.sentDate = today();
+      save();
+      render();
+    }
+  }
+
+  if (button.dataset.action === "delete") {
+    if (confirm("Delete this task?")) {
+      leads = leads.filter(x => x.id !== lead.id);
+      save();
+      render();
+    }
+  }
+});
+
+$("export").addEventListener("click", () => {
+  const quote = value => '"' + String(value ?? "").replace(/"/g,'""') + '"';
+  const rows = [
+    ["Business","Phone","Service","Created","Sent date","Message"],
+    ...leads.map(x => [
+      x.business,x.phone,x.service,x.created,x.sentDate || "",messageFor(x)
+    ])
+  ];
+  const csv = rows.map(row => row.map(quote).join(",")).join("\r\n");
+  const blob = new Blob(["\uFEFF" + csv], {type:"text/csv;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "poster-outreach-backup.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+$("clear").addEventListener("click", () => {
+  if (confirm("Permanently delete all saved outreach tasks? Export a backup first if needed.")) {
+    leads = [];
+    save();
+    render();
+    $("feedback").textContent = "All tasks deleted.";
+  }
+});
+
+render();
+</script>
 </body>
 </html>
